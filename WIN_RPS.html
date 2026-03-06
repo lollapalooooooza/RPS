@@ -1,0 +1,600 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Before the Gesture — Preemptive RPS</title>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.17.0/dist/tf.min.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=DM+Mono:wght@300;400;500&family=Syne:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --bg:#0a0a0c;--bg-glass:rgba(24,24,30,.6);--border:rgba(255,255,255,.06);
+  --border-a:rgba(255,255,255,.12);--t1:rgba(255,255,255,.92);--t2:rgba(255,255,255,.45);
+  --t3:rgba(255,255,255,.22);--accent:#c8ff00;--accent-d:rgba(200,255,0,.15);
+  --danger:#ff3b5c;--success:#00e5a0;
+  --fd:'Instrument Serif',Georgia,serif;--fm:'DM Mono','Courier New',monospace;
+  --fu:'Syne','Helvetica Neue',sans-serif;
+  --ease:cubic-bezier(.16,1,.3,1);--r:12px;--rs:6px;
+}
+html,body{width:100%;height:100%;background:var(--bg);color:var(--t1);font-family:var(--fu);overflow:hidden;-webkit-font-smoothing:antialiased}
+
+#ambientCanvas{position:fixed;inset:0;z-index:0;pointer-events:none}
+
+/* INTRO */
+#intro{position:fixed;inset:0;z-index:100;display:flex;flex-direction:column;align-items:center;justify-content:center;background:var(--bg);transition:opacity 1.2s var(--ease),transform 1.2s var(--ease)}
+#intro.hidden{opacity:0;transform:scale(1.02);pointer-events:none}
+.i-over{font-family:var(--fm);font-size:11px;letter-spacing:4px;text-transform:uppercase;color:var(--t3);margin-bottom:24px;opacity:0;animation:fu 1s var(--ease) .3s forwards}
+.i-title{font-family:var(--fd);font-size:clamp(48px,8vw,100px);font-weight:400;line-height:1.05;text-align:center;max-width:700px;opacity:0;animation:fu 1.2s var(--ease) .6s forwards}
+.i-title em{font-style:italic;color:var(--accent)}
+.i-sub{font-family:var(--fm);font-size:13px;color:var(--t2);max-width:480px;text-align:center;line-height:1.7;margin-top:32px;opacity:0;animation:fu 1s var(--ease) 1s forwards}
+.i-btn{margin-top:56px;background:0 0;border:1px solid var(--border-a);color:var(--t1);font-family:var(--fm);font-size:12px;letter-spacing:3px;text-transform:uppercase;padding:14px 40px;border-radius:40px;cursor:pointer;transition:all .4s var(--ease);opacity:0;animation:fu 1s var(--ease) 1.4s forwards}
+.i-btn:hover{background:var(--t1);color:var(--bg);border-color:var(--t1)}
+@keyframes fu{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:translateY(0)}}
+
+/* APP */
+#app{position:fixed;inset:0;z-index:10;display:none;grid-template-columns:1fr 380px;grid-template-rows:56px 1fr auto;padding:16px;opacity:0;transition:opacity .8s var(--ease)}
+#app.visible{display:grid;opacity:1}
+
+.topbar{grid-column:1/-1;display:flex;align-items:center;justify-content:space-between;padding:0 8px}
+.topbar-t{font-family:var(--fd);font-size:20px;font-style:italic}
+.topbar-nav{display:flex;gap:4px}
+.topbar-nav button{background:0 0;border:1px solid transparent;color:var(--t2);font-family:var(--fm);font-size:11px;letter-spacing:2px;text-transform:uppercase;padding:6px 16px;border-radius:20px;cursor:pointer;transition:all .3s var(--ease)}
+.topbar-nav button:hover{color:var(--t1);border-color:var(--border-a)}
+.topbar-nav button.active{color:var(--bg);background:var(--t1);border-color:var(--t1)}
+
+/* VIDEO */
+.vid-area{position:relative;border-radius:var(--r);overflow:hidden;background:#111;min-height:0}
+#vid{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;transform:scaleX(-1);opacity:.85}
+#olay{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;transform:scaleX(-1)}
+.vid-st{position:absolute;top:16px;left:16px;display:flex;align-items:center;gap:8px;font-family:var(--fm);font-size:11px;color:var(--t2);letter-spacing:1px;z-index:3}
+.dot{width:6px;height:6px;border-radius:50%;background:var(--danger);transition:background .3s}.dot.on{background:var(--success)}
+.vid-txt{position:absolute;bottom:20px;left:0;right:0;text-align:center;font-family:var(--fm);font-size:12px;color:var(--t2);letter-spacing:1px;pointer-events:none;z-index:3}
+.vid-area::after{content:'';position:absolute;inset:0;background:repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(0,0,0,.03) 2px,rgba(0,0,0,.03) 4px);pointer-events:none;z-index:2}
+
+/* Loading */
+.ld-ov{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;background:rgba(10,10,12,.92);z-index:8;border-radius:var(--r);gap:16px}
+.ld-ov p{font-family:var(--fm);font-size:12px;color:var(--t2);letter-spacing:1px}
+.spinner{width:28px;height:28px;border:2px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin 1s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* Center word */
+.ctr-d{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;pointer-events:none;z-index:4}
+#cw{font-family:var(--fd);font-size:0;opacity:0;text-transform:uppercase;letter-spacing:4px;color:var(--t1);text-shadow:0 0 60px rgba(200,255,0,.2)}
+#cw.pop{animation:wp .65s var(--ease) forwards}
+#cw.acc{color:var(--accent);text-shadow:0 0 80px rgba(200,255,0,.5)}
+@keyframes wp{0%{font-size:clamp(52px,10vw,120px);transform:scale(.5);opacity:0}25%{transform:scale(1.15);opacity:1}100%{transform:scale(1);opacity:0;font-size:clamp(52px,10vw,120px)}}
+
+/* AI flash move — big instant reveal */
+.ai-flash{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;pointer-events:none;z-index:6;opacity:0;transition:opacity .15s}
+.ai-flash.show{opacity:1}
+.ai-flash-emoji{font-size:120px;filter:drop-shadow(0 0 40px rgba(200,255,0,.4));transform:scale(0);transition:transform .3s var(--ease)}
+.ai-flash.show .ai-flash-emoji{transform:scale(1)}
+.ai-flash-label{font-family:var(--fm);font-size:12px;letter-spacing:3px;text-transform:uppercase;color:var(--accent);margin-top:12px}
+
+/* Battle reveal overlay */
+.b-rev{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;gap:40px;pointer-events:none;z-index:7;opacity:0;transition:opacity .5s var(--ease);background:rgba(10,10,12,.82);backdrop-filter:blur(12px)}
+.b-rev.vis{opacity:1}
+.rev-s{display:flex;flex-direction:column;align-items:center;gap:12px}
+.rev-e{font-size:72px;transform:scale(0);transition:transform .5s var(--ease)}.b-rev.vis .rev-e{transform:scale(1)}
+.rev-l{font-family:var(--fm);font-size:10px;letter-spacing:3px;text-transform:uppercase;color:var(--t2)}
+.rev-m{font-family:var(--fu);font-size:18px;font-weight:600;letter-spacing:2px;text-transform:uppercase}
+.rev-vs{font-family:var(--fd);font-size:28px;font-style:italic;color:var(--t3)}
+.rev-out{position:absolute;bottom:56px;left:0;right:0;text-align:center;font-family:var(--fm);font-size:14px;letter-spacing:3px;text-transform:uppercase;opacity:0;transition:opacity .4s .5s}
+.b-rev.vis .rev-out{opacity:1}
+.rev-n{position:absolute;bottom:30px;left:0;right:0;text-align:center;font-family:var(--fm);font-size:10px;letter-spacing:1px;color:var(--t3);opacity:0;transition:opacity .4s .7s}
+.b-rev.vis .rev-n{opacity:1}
+
+/* Training ring */
+.t-ring{position:absolute;top:14px;right:14px;width:54px;height:54px;z-index:6;display:none}
+.t-ring svg{transform:rotate(-90deg)}.t-ring .tk{fill:none;stroke:rgba(255,255,255,.08);stroke-width:3}
+.t-ring .fl{fill:none;stroke:var(--accent);stroke-width:3;stroke-linecap:round}
+.t-ring-t{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-family:var(--fm);font-size:11px;color:var(--accent)}
+
+/* SIDE PANEL */
+.side{display:flex;flex-direction:column;gap:12px;overflow-y:auto;padding-left:12px;scrollbar-width:none}
+.side::-webkit-scrollbar{display:none}
+.pnl{background:var(--bg-glass);border:1px solid var(--border);border-radius:var(--r);padding:20px;backdrop-filter:blur(20px);transition:border-color .3s}
+.pnl:hover{border-color:var(--border-a)}
+.pnl-l{font-family:var(--fm);font-size:10px;letter-spacing:3px;text-transform:uppercase;color:var(--t3);margin-bottom:14px}
+
+/* Confidence */
+.cf-r{display:flex;align-items:center;gap:10px;margin-bottom:8px}
+.cf-l{font-family:var(--fm);font-size:11px;color:var(--t2);width:60px;text-transform:uppercase;letter-spacing:1px}
+.cf-t{flex:1;height:3px;background:rgba(255,255,255,.06);border-radius:2px;overflow:hidden}
+.cf-f{height:100%;background:var(--t2);border-radius:2px;transition:width .15s,background .3s;width:0%}
+.cf-f.ld{background:var(--accent)}
+.cf-v{font-family:var(--fm);font-size:11px;color:var(--t3);width:36px;text-align:right}
+
+/* Win rate stats */
+.wr-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:12px}
+.wr-item{text-align:center;padding:12px 0;background:rgba(255,255,255,.03);border-radius:var(--rs);border:1px solid var(--border)}
+.wr-num{font-family:var(--fm);font-size:22px;font-weight:500;margin-bottom:4px}
+.wr-lab{font-family:var(--fm);font-size:9px;letter-spacing:2px;text-transform:uppercase;color:var(--t3)}
+.wr-bar-wrap{height:6px;background:rgba(255,255,255,.06);border-radius:3px;overflow:hidden;margin-top:8px}
+.wr-bar{height:100%;border-radius:3px;transition:width .5s var(--ease)}
+.wr-pct{font-family:var(--fm);font-size:18px;margin-top:12px;text-align:center;letter-spacing:1px}
+.wr-pct span{color:var(--accent)}
+
+/* Battle button */
+.b-btn{display:block;margin:14px auto 0;padding:12px 28px;background:0 0;border:1px solid var(--accent);color:var(--accent);font-family:var(--fm);font-size:11px;letter-spacing:3px;text-transform:uppercase;border-radius:30px;cursor:pointer;transition:all .3s var(--ease)}
+.b-btn:hover{background:var(--accent);color:var(--bg)}.b-btn:disabled{opacity:.3;cursor:not-allowed}
+
+/* Training */
+.t-hint{font-family:var(--fm);font-size:10px;color:var(--t3);margin-bottom:14px;line-height:1.6}
+.t-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:14px}
+.t-btn{background:rgba(255,255,255,.04);border:1px solid var(--border);border-radius:var(--rs);padding:14px 6px;text-align:center;cursor:pointer;transition:all .3s var(--ease);position:relative;overflow:hidden}
+.t-btn:hover{border-color:var(--border-a);background:rgba(255,255,255,.06)}
+.t-btn.rec{border-color:var(--accent);background:var(--accent-d)}
+.t-btn.done{border-color:rgba(0,229,160,.4)}
+.t-btn-e{font-size:24px;margin-bottom:6px}.t-btn-l{font-family:var(--fm);font-size:10px;color:var(--t2);letter-spacing:1px;text-transform:uppercase}
+.t-btn-c{font-family:var(--fm);font-size:10px;color:var(--t3);margin-top:4px}
+.t-btn-b{position:absolute;bottom:0;left:0;height:2px;background:var(--accent);width:0%;transition:width .3s linear}
+.t-acts{display:flex;gap:6px;flex-wrap:wrap}
+.a-btn{flex:1;min-width:70px;background:0 0;border:1px solid var(--border);color:var(--t2);font-family:var(--fm);font-size:10px;letter-spacing:1.5px;text-transform:uppercase;padding:10px 10px;border-radius:var(--rs);cursor:pointer;transition:all .3s var(--ease)}
+.a-btn:hover{border-color:var(--t2);color:var(--t1)}.a-btn:disabled{opacity:.3;cursor:not-allowed}
+.a-btn.pri{border-color:var(--accent);color:var(--accent)}.a-btn.pri:hover{background:var(--accent);color:var(--bg)}
+.t-st{font-family:var(--fm);font-size:10px;color:var(--t3);margin-top:12px;min-height:14px;line-height:1.5}
+
+/* History */
+.h-tl{display:flex;gap:3px;align-items:flex-end;height:32px}
+.h-p{width:6px;border-radius:2px}.h-p.w{background:var(--accent)}.h-p.l{background:var(--danger)}.h-p.t{background:var(--t3)}
+
+.bottombar{grid-column:1/-1;display:flex;align-items:center;justify-content:center;padding:8px;font-family:var(--fm);font-size:10px;color:var(--t3);letter-spacing:1px}
+
+@keyframes pulse{0%,100%{opacity:.4}50%{opacity:1}}.pulsing{animation:pulse 1.5s ease-in-out infinite}
+@media(max-width:900px){#app{grid-template-columns:1fr;grid-template-rows:48px 50vh 1fr auto}.side{padding-left:0;padding-top:8px}}
+</style>
+</head>
+<body>
+<canvas id="ambientCanvas"></canvas>
+
+<div id="intro">
+  <div class="i-over">Predictive Gesture System v1.0</div>
+  <h1 class="i-title">Before the <em>Gesture</em></h1>
+  <p class="i-sub">The machine does not wait for your choice.<br>It reads the choice before it exists.</p>
+  <button class="i-btn" onclick="enterApp()">Initialize System</button>
+</div>
+
+<div id="app">
+  <div class="topbar">
+    <div class="topbar-t">Before the Gesture</div>
+    <div class="topbar-nav">
+      <button id="navT" class="active" onclick="setMode('training')">Train</button>
+      <button id="navB" onclick="setMode('battle')">Battle</button>
+    </div>
+  </div>
+
+  <div class="vid-area">
+    <video id="vid" autoplay playsinline></video>
+    <canvas id="olay"></canvas>
+    <div class="vid-st"><div class="dot" id="hd"></div><span id="hs">Awaiting hand</span></div>
+    <div class="vid-txt" id="vt">Position hand in frame</div>
+    <div class="ctr-d"><div id="cw"></div></div>
+
+    <!-- AI instant flash -->
+    <div class="ai-flash" id="aiFlash">
+      <div class="ai-flash-emoji" id="aiFlashEmoji"></div>
+      <div class="ai-flash-label" id="aiFlashLabel"></div>
+    </div>
+
+    <!-- Result overlay -->
+    <div class="b-rev" id="bRev">
+      <div class="rev-s"><div class="rev-l">System</div><div class="rev-e" id="rAI"></div><div class="rev-m" id="rAIT"></div></div>
+      <div class="rev-vs">vs</div>
+      <div class="rev-s"><div class="rev-l">Human</div><div class="rev-e" id="rHU"></div><div class="rev-m" id="rHUT"></div></div>
+      <div class="rev-out" id="rOut"></div>
+      <div class="rev-n" id="rN"></div>
+    </div>
+
+    <div class="t-ring" id="tRing">
+      <svg viewBox="0 0 54 54"><circle class="tk" cx="27" cy="27" r="23"/><circle class="fl" id="tRF" cx="27" cy="27" r="23" stroke-dasharray="144.51" stroke-dashoffset="144.51"/></svg>
+      <div class="t-ring-t" id="tRT">0</div>
+    </div>
+    <div class="ld-ov" id="ldOv"><div class="spinner"></div><p id="ldTxt">Requesting camera...</p></div>
+  </div>
+
+  <div class="side">
+    <!-- Confidence -->
+    <div class="pnl">
+      <div class="pnl-l">Pre-Gesture Analysis</div>
+      <div class="cf-r"><span class="cf-l">Rock</span><div class="cf-t"><div class="cf-f" id="cfR"></div></div><span class="cf-v" id="cfRV">—</span></div>
+      <div class="cf-r"><span class="cf-l">Paper</span><div class="cf-t"><div class="cf-f" id="cfP"></div></div><span class="cf-v" id="cfPV">—</span></div>
+      <div class="cf-r"><span class="cf-l">Scissors</span><div class="cf-t"><div class="cf-f" id="cfS"></div></div><span class="cf-v" id="cfSV">—</span></div>
+    </div>
+
+    <!-- Win Rate Stats (battle) -->
+    <div class="pnl mode-b" style="display:none">
+      <div class="pnl-l">Engagement Statistics</div>
+      <div class="wr-grid">
+        <div class="wr-item"><div class="wr-num" id="sAI" style="color:var(--accent)">0</div><div class="wr-lab">System</div></div>
+        <div class="wr-item"><div class="wr-num" id="sHU" style="color:var(--danger)">0</div><div class="wr-lab">Human</div></div>
+        <div class="wr-item"><div class="wr-num" id="sTI" style="color:var(--t3)">0</div><div class="wr-lab">Ties</div></div>
+      </div>
+      <div class="wr-pct">System win rate: <span id="wrPct">0%</span></div>
+      <div class="wr-bar-wrap"><div class="wr-bar" id="wrBar" style="width:0%;background:var(--accent)"></div></div>
+      <button class="b-btn" id="btnGo" onclick="startBattle()">Initiate Round</button>
+    </div>
+
+    <!-- History (battle) -->
+    <div class="pnl mode-b" style="display:none">
+      <div class="pnl-l">Round History</div>
+      <div class="h-tl" id="hTL"></div>
+    </div>
+
+    <!-- Training -->
+    <div class="pnl mode-t">
+      <div class="pnl-l">Gesture Acquisition</div>
+      <p class="t-hint">
+        <strong style="color:var(--t1)">How it works:</strong> Start with a closed fist. On signal, transition to the target gesture.
+        Repeat naturally for 15 seconds. The system learns your fist → gesture motion patterns.
+      </p>
+      <div class="t-grid">
+        <div class="t-btn" id="bR" onclick="startCap('rock')"><div class="t-btn-e">✊</div><div class="t-btn-l">Rock</div><div class="t-btn-c" id="cR">0</div><div class="t-btn-b" id="brR"></div></div>
+        <div class="t-btn" id="bP" onclick="startCap('paper')"><div class="t-btn-e">✋</div><div class="t-btn-l">Paper</div><div class="t-btn-c" id="cP">0</div><div class="t-btn-b" id="brP"></div></div>
+        <div class="t-btn" id="bS" onclick="startCap('scissors')"><div class="t-btn-e">✌️</div><div class="t-btn-l">Scissors</div><div class="t-btn-c" id="cS">0</div><div class="t-btn-b" id="brS"></div></div>
+      </div>
+      <div class="t-acts">
+        <button class="a-btn pri" id="btnTr" onclick="trainModel()" disabled>Train</button>
+        <button class="a-btn" onclick="clearData()">Clear</button>
+        <button class="a-btn" id="btnSv" onclick="saveModel()" disabled>Save</button>
+        <button class="a-btn" onclick="document.getElementById('fIn').click()">Load</button>
+      </div>
+      <input type="file" id="fIn" accept=".json" style="display:none" onchange="loadModel(event)">
+      <div class="t-st" id="tSt">Press a gesture button. Start from a fist, then transition on the beat.</div>
+    </div>
+  </div>
+
+  <div class="bottombar"><div id="sysM" class="pulsing">System initializing...</div></div>
+</div>
+
+<script type="module">
+import{HandLandmarker,FilesetResolver}from'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.18/vision_bundle.mjs';
+
+/* ═══ CONFIG ═══ */
+const C={
+  WIN:12, FEAT:47, get INP(){return this.WIN*this.FEAT},
+  MIN:8, TH:.72, SM:.35,
+  CAP_DUR:15000, CAP_INT:400,
+  CLS:['rock','paper','scissors'],
+  CTR:{rock:'paper',paper:'scissors',scissors:'rock'},
+  SYM:{rock:'✊',paper:'✋',scissors:'✌️'},
+  CLID:{rock:'cR',paper:'cP',scissors:'cS'},
+  BRID:{rock:'brR',paper:'brP',scissors:'brS'},
+  BTID:{rock:'bR',paper:'bP',scissors:'bS'},
+};
+
+/* ═══ STATE ═══ */
+const S={
+  mode:'training',handOk:false,lm:null,buf:[],
+  data:{rock:[],paper:[],scissors:[]},
+  model:null,trained:false,isTr:false,
+  nM:null,nS:null,
+  cap:false,capC:null,capT:null,capS:0,
+  // Battle
+  ph:'idle',
+  pred:{rock:.33,paper:.33,scissors:.33},
+  sm:{rock:.33,paper:.33,scissors:.33},
+  locked:null,counter:null,t0:0,tP:0,
+  sc:{ai:0,hu:0,ti:0},hist:[],total:0,
+  // Training beat system
+  beatPhase:'idle', // idle|fist|go
+};
+
+window.enterApp=enterApp;window.setMode=setMode;window.startCap=startCap;
+window.clearData=clearData;window.trainModel=trainModel;window.saveModel=saveModel;
+window.loadModel=loadModel;window.startBattle=startBattle;
+
+/* ═══ SPEECH ═══ */
+function speak(t,r=1){return new Promise(d=>{if(!speechSynthesis){d();return}const u=new SpeechSynthesisUtterance(t);u.rate=r;u.pitch=.75;u.volume=.8;const v=speechSynthesis.getVoices();const p=v.find(x=>x.lang.startsWith('en'))||v[0];if(p)u.voice=p;u.onend=d;u.onerror=d;speechSynthesis.speak(u)})}
+if(speechSynthesis){speechSynthesis.getVoices();speechSynthesis.onvoiceschanged=()=>speechSynthesis.getVoices()}
+
+/* ═══ CENTER POP ═══ */
+function pop(t,a=false){return new Promise(d=>{const e=$('cw');e.className='';e.textContent=t;void e.offsetWidth;e.className='pop'+(a?' acc':'');setTimeout(d,650)})}
+
+/* ═══ AMBIENT ═══ */
+const ac=document.getElementById('ambientCanvas'),ax=ac.getContext('2d');let pts=[];
+function initA(){ac.width=innerWidth;ac.height=innerHeight;pts=Array.from({length:60},()=>({x:Math.random()*ac.width,y:Math.random()*ac.height,vx:(Math.random()-.5)*.3,vy:(Math.random()-.5)*.3,r:Math.random()*1.5+.5,a:Math.random()*.12+.03}))}
+function drawA(){ax.fillStyle='rgba(10,10,12,.15)';ax.fillRect(0,0,ac.width,ac.height);for(const p of pts){p.x+=p.vx;p.y+=p.vy;if(p.x<0)p.x=ac.width;if(p.x>ac.width)p.x=0;if(p.y<0)p.y=ac.height;if(p.y>ac.height)p.y=0;ax.beginPath();ax.arc(p.x,p.y,p.r,0,Math.PI*2);ax.fillStyle=`rgba(200,255,0,${p.a})`;ax.fill()}for(let i=0;i<pts.length;i++)for(let j=i+1;j<pts.length;j++){const d=Math.hypot(pts[i].x-pts[j].x,pts[i].y-pts[j].y);if(d<110){ax.beginPath();ax.moveTo(pts[i].x,pts[i].y);ax.lineTo(pts[j].x,pts[j].y);ax.strokeStyle=`rgba(200,255,0,${.03*(1-d/110)})`;ax.lineWidth=.5;ax.stroke()}}requestAnimationFrame(drawA)}
+addEventListener('resize',()=>{ac.width=innerWidth;ac.height=innerHeight});initA();drawA();
+
+/* ═══ INIT ═══ */
+function enterApp(){$el('intro').classList.add('hidden');$el('app').classList.add('visible');setTimeout(initSys,300)}
+
+const vid=$el('vid'),oC=$el('olay'),ox=oC.getContext('2d');
+let HL=null,lastTs=-1;
+
+async function initSys(){
+  const lt=$('ldTxt');
+  try{
+    lt.textContent='Requesting camera...';sysM('Requesting camera...');
+    vid.srcObject=await navigator.mediaDevices.getUserMedia({video:{width:640,height:480,facingMode:'user'}});
+    await vid.play();
+    lt.textContent='Loading hand model...';sysM('Loading hand model...');
+    const vi=await FilesetResolver.forVisionTasks('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.18/wasm');
+    HL=await HandLandmarker.createFromOptions(vi,{
+      baseOptions:{modelAssetPath:'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task',delegate:'GPU'},
+      runningMode:'VIDEO',numHands:1,minHandDetectionConfidence:.5,minHandPresenceConfidence:.5,minTrackingConfidence:.5
+    });
+    $el('ldOv').style.display='none';sysM('Hand tracking online.');vt('Position hand in frame');
+    (function loop(){if(HL&&vid.videoWidth){const t=vid.currentTime;if(t!==lastTs){lastTs=t;procRes(HL.detectForVideo(vid,performance.now()))}}requestAnimationFrame(loop)})();
+  }catch(e){console.error(e);lt.textContent=`Error: ${e.message}`;lt.style.color='var(--danger)'}
+}
+
+const CONN=[[0,1],[1,2],[2,3],[3,4],[0,5],[5,6],[6,7],[7,8],[0,9],[9,10],[10,11],[11,12],[0,13],[13,14],[14,15],[15,16],[0,17],[17,18],[18,19],[19,20],[5,9],[9,13],[13,17]];
+
+function procRes(r){
+  if(oC.width!==vid.videoWidth){oC.width=vid.videoWidth;oC.height=vid.videoHeight}
+  ox.clearRect(0,0,oC.width,oC.height);
+  if(r.landmarks?.length){
+    const lm=r.landmarks[0];S.handOk=true;S.lm=lm;
+    $('hd').classList.add('on');$('hs').textContent='Hand tracked';
+    drawH(lm);procF(lm);
+  }else{S.handOk=false;S.lm=null;$('hd').classList.remove('on');$('hs').textContent='No hand'}
+}
+
+function drawH(lm){
+  const w=oC.width,h=oC.height;
+  ox.strokeStyle='rgba(200,255,0,.35)';ox.lineWidth=1.5;
+  for(const[a,b]of CONN){ox.beginPath();ox.moveTo(lm[a].x*w,lm[a].y*h);ox.lineTo(lm[b].x*w,lm[b].y*h);ox.stroke()}
+  for(let i=0;i<lm.length;i++){const tp=[4,8,12,16,20].includes(i);ox.beginPath();ox.arc(lm[i].x*w,lm[i].y*h,tp?4:2.5,0,Math.PI*2);ox.fillStyle=tp?'rgba(200,255,0,.9)':'rgba(255,255,255,.5)';ox.fill();if(tp){ox.beginPath();ox.arc(lm[i].x*w,lm[i].y*h,8,0,Math.PI*2);ox.fillStyle='rgba(200,255,0,.1)';ox.fill()}}
+  if(S.buf.length>2){ox.strokeStyle='rgba(200,255,0,.12)';ox.lineWidth=1;ox.beginPath();for(let i=0;i<S.buf.length;i++){const f=S.buf[i];i===0?ox.moveTo(f[16]*w,f[17]*h):ox.lineTo(f[16]*w,f[17]*h)}ox.stroke()}
+}
+
+/* ═══ FEATURES ═══ */
+function ext(lm){const f=[];for(const p of lm)f.push(p.x,p.y);const w=lm[0];for(const t of[4,8,12,16,20])f.push(Math.hypot(lm[t].x-w.x,lm[t].y-w.y));return f}
+function temp(buf){const p=[];const n=C.WIN;if(buf.length<n){const z=new Array(C.FEAT).fill(0);for(let i=0;i<n-buf.length;i++)p.push(z)}const s=Math.max(0,buf.length-n);for(let i=s;i<buf.length;i++)p.push(buf[i]);return p.flat()}
+function procF(lm){const f=ext(lm);S.buf.push(f);if(S.buf.length>30)S.buf.shift();if(S.mode==='battle'&&S.trained&&S.ph==='reading')classify()}
+
+/* ═══ 15-SEC TRAINING CAPTURE ═══
+   User repeatedly: fist → gesture → fist → gesture
+   Every CAP_INT ms we sample the rolling buffer (captures transitions)
+   The beat system guides them with visual cues ═══ */
+function startCap(cls){
+  if(S.cap||S.isTr)return;
+  if(!S.handOk){tSt('Show hand first.');return}
+  S.cap=true;S.capC=cls;S.capS=Date.now();
+  $(C.BTID[cls]).classList.add('rec');
+  $el('tRing').style.display='block';
+  tSt(`Recording ${cap(cls)}... Start with FIST, transition to ${cls} on beat, repeat.`);
+  vt(`✊ Start with fist → transition to ${cls}`);
+  sysM('Acquiring transition data...');
+
+  // Beat system: alternate "FIST" and "GO!" prompts every 2s
+  let beatCount=0;
+  const beatTimer=setInterval(()=>{
+    beatCount++;
+    if(beatCount%2===1){vt(`✊ Return to fist...`);S.beatPhase='fist'}
+    else{vt(`→ Now transition to ${cls}!`);S.beatPhase='go'}
+  },2000);
+
+  const circ=144.51;
+  S.capT=setInterval(()=>{
+    const el=Date.now()-S.capS;
+    const pct=Math.min(el/C.CAP_DUR,1);
+    $(C.BRID[cls]).style.width=`${pct*100}%`;
+    $('tRF').style.strokeDashoffset=circ*(1-pct);
+
+    if(S.handOk&&S.buf.length>=C.WIN){
+      S.data[cls].push(temp(S.buf));
+      $(C.CLID[cls]).textContent=S.data[cls].length;
+      $('tRT').textContent=S.data[cls].length;
+    }
+    if(el>=C.CAP_DUR){clearInterval(beatTimer);stopCap(cls)}
+  },C.CAP_INT);
+}
+
+function stopCap(cls){
+  clearInterval(S.capT);S.cap=false;S.beatPhase='idle';
+  $(C.BTID[cls]).classList.remove('rec');$(C.BTID[cls]).classList.add('done');
+  $(C.BRID[cls]).style.width='100%';$el('tRing').style.display='none';
+  tSt(`${cap(cls)} done: ${S.data[cls].length} samples.`);vt('Position hand in frame');sysM('Data acquired.');
+  chkReady();
+}
+
+function clearData(){
+  if(S.cap)return;S.data={rock:[],paper:[],scissors:[]};S.trained=false;S.model=null;
+  for(const c of C.CLS){$(C.CLID[c]).textContent='0';$(C.BRID[c]).style.width='0%';$(C.BTID[c]).classList.remove('done')}
+  $('btnTr').disabled=true;$('btnSv').disabled=true;tSt('Data cleared.');
+}
+
+function chkReady(){
+  const ok=C.CLS.every(c=>S.data[c].length>=C.MIN);
+  $('btnTr').disabled=!ok;
+  ok?tSt('Ready to train.'):tSt(`Need more: ${C.CLS.filter(c=>S.data[c].length<C.MIN).map(cap).join(', ')}`);
+}
+
+/* ═══ TRAIN ═══ */
+async function trainModel(){
+  if(S.isTr)return;S.isTr=true;$('btnTr').disabled=true;tSt('Building architecture...');
+  const xs=[],ys=[];
+  for(let i=0;i<C.CLS.length;i++)for(const s of S.data[C.CLS[i]]){xs.push(s);const l=[0,0,0];l[i]=1;ys.push(l)}
+  const xT=tf.tensor2d(xs),{mean:mn,variance:vr}=tf.moments(xT,0),sd=vr.sqrt().add(tf.scalar(1e-7));
+  S.nM=await mn.array();S.nS=await sd.array();
+  const xN=xT.sub(mn).div(sd),yT=tf.tensor2d(ys);
+  const m=tf.sequential();
+  m.add(tf.layers.dense({inputShape:[C.INP],units:256,activation:'relu',kernelRegularizer:tf.regularizers.l2({l2:.001})}));
+  m.add(tf.layers.dropout({rate:.3}));
+  m.add(tf.layers.dense({units:128,activation:'relu',kernelRegularizer:tf.regularizers.l2({l2:.001})}));
+  m.add(tf.layers.dropout({rate:.2}));
+  m.add(tf.layers.dense({units:64,activation:'relu'}));
+  m.add(tf.layers.dense({units:3,activation:'softmax'}));
+  m.compile({optimizer:tf.train.adam(.001),loss:'categoricalCrossentropy',metrics:['accuracy']});
+  tSt('Training...');
+  await m.fit(xN,yT,{epochs:60,batchSize:16,shuffle:true,validationSplit:.15,
+    callbacks:{onEpochEnd:(e,l)=>{if(e%10===0||e===59)tSt(`Epoch ${e+1}/60 — Acc: ${(l.acc*100).toFixed(1)}%`)}}});
+  S.model=m;S.trained=true;S.isTr=false;
+  $('btnTr').disabled=false;$('btnSv').disabled=false;
+  tSt('Model trained. Switch to Battle.');sysM('Neural model calibrated.');
+  xT.dispose();xN.dispose();yT.dispose();mn.dispose();vr.dispose();sd.dispose();
+}
+
+/* ═══ CLASSIFY ═══ */
+function classify(){
+  if(!S.model||S.buf.length<3)return;
+  const v=temp(S.buf),n=v.map((x,i)=>(x-S.nM[i])/S.nS[i]);
+  const inp=tf.tensor2d([n]),p=S.model.predict(inp),pr=p.dataSync();inp.dispose();p.dispose();
+  const a=C.SM;
+  S.sm.rock=a*pr[0]+(1-a)*S.sm.rock;S.sm.paper=a*pr[1]+(1-a)*S.sm.paper;S.sm.scissors=a*pr[2]+(1-a)*S.sm.scissors;
+  S.pred={...S.sm};updConf();
+
+  const best=mx(S.pred);
+  if(S.pred[best]>=C.TH&&S.ph==='reading'){
+    S.locked=best;S.counter=C.CTR[best];S.tP=Date.now()-S.t0;S.ph='locked';
+  }
+}
+
+function mx(p){let m=-1,c='rock';for(const k of C.CLS)if(p[k]>m){m=p[k];c=k}return c}
+
+function updConf(){
+  const ld=mx(S.pred);
+  const ids={rock:['cfR','cfRV'],paper:['cfP','cfPV'],scissors:['cfS','cfSV']};
+  for(const c of C.CLS){const pct=(S.pred[c]*100).toFixed(0);$(ids[c][0]).style.width=`${pct}%`;$(ids[c][1]).textContent=`${pct}%`;$(ids[c][0]).classList.toggle('ld',c===ld)}
+}
+
+/* ═══ BATTLE ═══ */
+async function startBattle(){
+  if(S.ph!=='idle'||!S.trained)return;
+  $('btnGo').disabled=true;
+
+  // Reset
+  S.sm={rock:.33,paper:.33,scissors:.33};S.locked=null;S.counter=null;S.buf=[];
+  $el('bRev').classList.remove('vis');$el('aiFlash').classList.remove('show');
+
+  S.ph='countdown';sysM('Round initiated.');vt('Prepare fist...');
+  await slp(600);
+
+  // "Rock... Paper... SCISSORS!"
+  speak('Rock!',0.8); await pop('Rock'); await slp(500);
+  speak('Paper!',0.8); await pop('Paper'); await slp(500);
+  speak('Scissors!',0.9); await pop('Scissors!',true); await slp(150);
+
+  // Start reading — capture the fist→gesture transition
+  S.ph='reading';S.t0=Date.now();
+  vt('Show your gesture NOW!');sysM('Reading transition...');
+
+  // Wait for lock or timeout (2.5s max)
+  await new Promise(d=>{
+    let el=0;
+    const iv=setInterval(()=>{
+      el+=60;
+      if(S.ph==='locked'){clearInterval(iv);d()}
+      else if(el>=2500){
+        clearInterval(iv);
+        S.locked=mx(S.pred);S.counter=C.CTR[S.locked];S.tP=Date.now()-S.t0;S.ph='locked';d();
+      }
+    },60);
+  });
+
+  // ── INSTANT AI MOVE FLASH ──
+  const aiMove=S.counter;
+  $('aiFlashEmoji').textContent=C.SYM[aiMove];
+  $('aiFlashLabel').textContent=`System plays ${cap(aiMove)}`;
+  $el('aiFlash').classList.add('show');
+  speak(cap(aiMove)+'!',0.9);
+
+  // Hold flash for 1.5s while continuing to read human gesture
+  S.ph='confirming';
+  await slp(1500);
+
+  // Determine human's actual gesture from latest prediction
+  const actual=mx(S.pred);
+  const predicted=S.locked;
+
+  // Hide flash, show full reveal
+  $el('aiFlash').classList.remove('show');
+  await slp(200);
+
+  // Outcome
+  let outcome;
+  if(actual===aiMove){outcome='tie';S.sc.ti++}
+  else if(C.CTR[actual]===aiMove){outcome='ai_win';S.sc.ai++}
+  else{outcome='human_win';S.sc.hu++}
+  S.total++;
+
+  // Show result overlay
+  $('rAI').textContent=C.SYM[aiMove];$('rAIT').textContent=cap(aiMove);
+  $('rHU').textContent=C.SYM[actual];$('rHUT').textContent=cap(actual);
+  const labels={ai_win:'The machine moved first.',human_win:'Prediction drift.',tie:'Convergence.'};
+  const ro=$('rOut');ro.textContent=labels[outcome];
+  ro.style.color=outcome==='ai_win'?'var(--accent)':outcome==='human_win'?'var(--danger)':'var(--t3)';
+  $('rN').textContent=`Predicted ${cap(predicted)} · Locked ${S.tP}ms into transition`;
+  $el('bRev').classList.add('vis');
+
+  if(outcome==='ai_win')speak('System wins.',0.7);
+  else if(outcome==='human_win')speak('Human deviation.',0.7);
+  else speak('Tie.',0.7);
+
+  // Update stats
+  $('sAI').textContent=S.sc.ai;$('sHU').textContent=S.sc.hu;$('sTI').textContent=S.sc.ti;
+  const wr=S.total>0?Math.round(S.sc.ai/S.total*100):0;
+  $('wrPct').textContent=`${wr}%`;
+  $('wrBar').style.width=`${wr}%`;
+  S.hist.push(outcome);updHist();
+
+  const msgs={ai_win:'Outcome preempted.',human_win:'Human deviation detected.',tie:'Symmetric resolution.'};
+  sysM(msgs[outcome]);
+
+  // Reset after 3.5s
+  await slp(3500);
+  $el('bRev').classList.remove('vis');S.ph='idle';
+  $('btnGo').disabled=false;
+  vt('Press Initiate Round');sysM('Pre-gesture analysis standing by.');
+}
+
+function updHist(){
+  const t=$el('hTL');t.innerHTML='';
+  for(const h of S.hist.slice(-40)){
+    const d=document.createElement('div');d.className='h-p';
+    if(h==='ai_win'){d.classList.add('w');d.style.height='24px'}
+    else if(h==='human_win'){d.classList.add('l');d.style.height='16px'}
+    else{d.classList.add('t');d.style.height='10px'}
+    t.appendChild(d);
+  }
+}
+
+/* ═══ MODE ═══ */
+function setMode(m){
+  if(S.cap||S.ph!=='idle')return;S.mode=m;
+  $('navT').classList.toggle('active',m==='training');$('navB').classList.toggle('active',m==='battle');
+  document.querySelectorAll('.mode-t').forEach(e=>e.style.display=m==='training'?'':'none');
+  document.querySelectorAll('.mode-b').forEach(e=>e.style.display=m==='battle'?'':'none');
+  if(m==='battle'){
+    if(!S.trained){sysM('No model. Train first.');vt('Model required');$('btnGo').disabled=true}
+    else{sysM('Analysis standing by.');vt('Press Initiate Round');$('btnGo').disabled=false}
+    S.ph='idle';
+  }else{S.ph='idle';sysM('Gesture acquisition mode.');vt('Position hand in frame')}
+}
+
+/* ═══ SAVE/LOAD ═══ */
+async function saveModel(){
+  if(!S.model)return;
+  await S.model.save(tf.io.withSaveHandler(async a=>{
+    const d={mt:a.modelTopology,ws:a.weightSpecs,wd:Array.from(new Uint8Array(a.weightData)),nM:S.nM,nS:S.nS};
+    const b=new Blob([JSON.stringify(d)],{type:'application/json'});
+    const el=document.createElement('a');el.href=URL.createObjectURL(b);el.download='preemptive-rps.json';el.click();
+    return{modelArtifactsInfo:{dateSaved:new Date(),modelTopologyType:'JSON'}};
+  }));tSt('Model saved.');
+}
+async function loadModel(ev){
+  const f=ev.target.files[0];if(!f)return;
+  try{const d=JSON.parse(await f.text());S.nM=d.nM;S.nS=d.nS;
+    S.model=await tf.loadLayersModel(tf.io.fromMemory(d.mt,d.ws,new Uint8Array(d.wd).buffer));
+    S.trained=true;$('btnSv').disabled=false;tSt('Model loaded.');sysM('Model loaded.');
+  }catch(e){console.error(e);tSt('Load error.')}ev.target.value='';
+}
+
+/* ═══ UTILS ═══ */
+function $(id){return document.getElementById(id)}
+function $el(id){return document.getElementById(id)}
+function cap(s){return s[0].toUpperCase()+s.slice(1)}
+function sysM(m){$('sysM').textContent=m}
+function tSt(m){$('tSt').textContent=m}
+function vt(m){$('vt').textContent=m}
+function slp(ms){return new Promise(r=>setTimeout(r,ms))}
+
+setMode('training');
+</script>
+</body>
+</html>
